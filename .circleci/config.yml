@@ -1,0 +1,697 @@
+version: 2.1
+
+jobs:
+  petalmap:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Restore vendored sources
+          command: tar xzf egg.tgz
+      - run:
+          name: Provision build deps
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: Register field boundaries
+          command: |
+            printf 'id,lat,lon\n' > fields.csv && seq 1 8|awk '{printf "%d,%.2f,%.2f\n",$1,23.5+$1/100,120.4+$1/100}' >> fields.csv
+      - run:
+          name: Transpile with tsc
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target petalmap -j2
+      - run:
+          name: Rasterize NDVI by field
+          command: ./build/petalmap --fields=fields.csv --res=10m
+  I18nSweep:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Fetch fixtures
+          command: tar xzf egg.tgz
+      - run:
+          name: Install prerequisites
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: Message catalog
+          command: |
+            ( printf 'greeting=Hello\nbye=Goodbye\n' > en.properties && cp en.properties fr.properties )
+      - run:
+          name: gradle i18nCompile
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target I18nSweep -j2
+      - run:
+          name: Find untranslated keys
+          command: ./build/I18nSweep --base en.properties --compare fr.properties
+  demandFcWeekly:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Sync asset bundles
+          command: tar xzf egg.tgz
+      - run:
+          name: Provision compiler
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: Weekly history
+          command: |
+            seq -f '%g 0' 1 104 > hist.txt
+      - run:
+          name: pip wheel .
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target demandFcWeekly -j2
+      - run:
+          name: 13-week forecast, ETS
+          command: ./build/demandFcWeekly hist.txt --horizon 13
+  fennel:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Unpack toolkit
+          command: tar xzf egg.tgz
+      - run:
+          name: Install toolchain
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: Waveform stub
+          command: |
+            head -c 200000 /dev/urandom > trace.mseed
+      - run:
+          name: cmake --build build -j4
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target fennel -j2
+      - run:
+          name: STA/LTA phase picking
+          command: ./build/fennel trace.mseed --sta 1 --lta 10 --thr 3.5
+  MapMatch:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Hydrate workspace
+          command: tar xzf egg.tgz
+      - run:
+          name: Bootstrap toolchain
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: GPS trace
+          command: |
+            seq 1 300|awk '{printf "%.5f,%.5f\n",23.59+$1*0.0001,120.47+$1*0.0002}' > trace.csv
+      - run:
+          name: cmake --build build
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target MapMatch -j2
+      - run:
+          name: HMM map matching
+          command: ./build/MapMatch trace.csv --sigma 4.07
+  jade4:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Extract sources
+          command: tar xzf egg.tgz
+      - run:
+          name: Prepare build environment
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: Income lines
+          command: |
+            : > income.csv && printf '%s,%s\n' salary 1250000 dividends 48000 rent 180000 >> income.csv
+      - run:
+          name: cargo build
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target jade4 -j2
+      - run:
+          name: Compute tiered tax and credits
+          command: ./build/jade4 income.csv --filing single --year 2026
+  go-mcts:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Restore build cache
+          command: tar xzf egg.tgz
+      - run:
+          name: Install build tools
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: SGF opening
+          command: |
+            ( echo '(;GM[1]SZ[19];B[pd];W[dp])' > opening.sgf )
+      - run:
+          name: cmake --build build -j
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target go-mcts -j2
+      - run:
+          name: 2000 playouts per move, 10 moves
+          command: ./build/go-mcts opening.sgf --playouts 2000 --moves 10
+  GpxSimplify:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Pull reference data
+          command: tar xzf egg.tgz
+      - run:
+          name: Provision SDK
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: Track points
+          command: |
+            awk 'BEGIN{for(i=0;i<800;i++)printf "%.5f,%.5f\n",23.5+i*0.0001,120.4+i*0.00013}' > track.csv
+      - run:
+          name: go build .
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target GpxSimplify -j2
+      - run:
+          name: Douglas-Peucker simplify
+          command: ./build/GpxSimplify track.csv --epsilon 0.00005
+  aquaponics_ctl:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Stage inputs
+          command: tar xzf egg.tgz
+      - run:
+          name: Set up compiler
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: pH readings
+          command: |
+            seq -f '%.1f' 6.4 0.05 8.75 > ph.txt
+      - run:
+          name: PlatformIO build
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target aquaponics_ctl -j2
+      - run:
+          name: Dosing controller dry run
+          command: ./build/aquaponics_ctl ph.txt --target 6.8 --band 0.2
+  ballast-calc:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Unpack bundle
+          command: tar xzf egg.tgz
+      - run:
+          name: Install dependencies
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: Tank table
+          command: |
+            printf '%s %s\n' WB1 820 WB2 820 FP 300 AP 280 > tanks.txt
+      - run:
+          name: dotnet build -p:TreatWarningsAsErrors=true
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target ballast-calc -j2
+      - run:
+          name: Trim and stability check
+          command: ./build/ballast-calc tanks.txt --draft 8.2
+  moth:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Rehydrate tree
+          command: tar xzf egg.tgz
+      - run:
+          name: Prepare toolchain
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: Page inventory
+          command: |
+            find . -maxdepth 1 -type f > inventory.txt
+      - run:
+          name: go build .
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target moth -j2
+      - run:
+          name: Emit sitemap index
+          command: ./build/moth inventory.txt --base https://example.test
+  skureorder:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Fetch corpus
+          command: tar xzf egg.tgz
+      - run:
+          name: Bring up build env
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: Stock snapshot
+          command: |
+            ( printf 'sku,on_hand,lead_days\n' > stock.csv && seq 1 60|awk '{print "SKU"$1","int(rand()*50)","$1%9+2}' >> stock.csv )
+      - run:
+          name: pip wheel --no-deps .
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target skureorder -j2
+      - run:
+          name: Compute reorder points
+          command: ./build/skureorder stock.csv --service-level 0.95
+  logchew:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Checkout vendored deps
+          command: tar xzf egg.tgz
+      - run:
+          name: Install cmake and g++
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: Fake nginx access log
+          command: |
+            { yes '10.0.0.1 - - [28/Oct/2026:09:00:00 +0800] "GET / HTTP/1.1" 200 512' | head -n 5000 || true; } > access.log && split -l 1000 access.log part_
+      - run:
+          name: go build ./cmd/logchew
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target logchew -j2
+      - run:
+          name: Top paths by p95 latency
+          command: ./build/logchew part_* --format combined --top 20
+  ursa:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Prime workspace
+          command: tar xzf egg.tgz
+      - run:
+          name: Provision deps
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: Document set
+          command: |
+            echo '台北市信義區 新北市板橋區 嘉義縣大林鎮'|tr ' ' '\n' > docs.txt
+      - run:
+          name: npm run build
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target ursa -j2
+      - run:
+          name: Index with pinyin tokenizer
+          command: ./build/ursa docs.txt --tokenizer pinyin --fuzzy 1
+  revgeoTiles:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Unpack payload
+          command: tar xzf egg.tgz
+      - run:
+          name: Set up build deps
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: Coordinates
+          command: |
+            awk 'BEGIN{for(i=0;i<200;i++)printf "%.4f,%.4f\n",23.4+rand()*0.4,120.3+rand()*0.4}' > coords.csv
+      - run:
+          name: cargo build --release -j4
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target revgeoTiles -j2
+      - run:
+          name: Reverse geocode to town
+          command: ./build/revgeoTiles coords.csv --admin-level 3
+  sorrel:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Restore snapshot
+          command: tar xzf egg.tgz
+      - run:
+          name: Install native deps
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: Event timestamps
+          command: |
+            seq 1700000000 10 1700010000 > ts.txt
+      - run:
+          name: sbt assembly
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target sorrel -j2
+      - run:
+          name: Tumbling 5-min counts
+          command: ./build/sorrel ts.txt --window 300
+  payroll_oct:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Fetch sources
+          command: tar xzf egg.tgz
+      - run:
+          name: Bootstrap compiler
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: Employee hours
+          command: |
+            seq 1001 1040 > ids.txt && for _ in $(seq 40); do echo 160; done > hrs.txt && paste -d' ' ids.txt hrs.txt > hours.txt
+      - run:
+          name: mvn -q compile
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target payroll_oct -j2
+      - run:
+          name: Compute net pay and withholdings
+          command: ./build/payroll_oct hours.txt --period 2026-10 --rate-table tw2026
+  pumice:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Unroll archive
+          command: tar xzf egg.tgz
+      - run:
+          name: Prepare SDK
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: Password sample
+          command: |
+            head -c 256 /dev/urandom | tr -dc 'A-Za-z0-9' | cut -c1-16 > pw.txt
+      - run:
+          name: cargo build --release
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target pumice -j2
+      - run:
+          name: Benchmark cost factors 10-14
+          command: ./build/pumice pw.txt --costs 10,11,12,13,14
+  umbra:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Seed workspace
+          command: tar xzf egg.tgz
+      - run:
+          name: Provision toolchain
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: Rasterise sample page
+          command: |
+            dd if=/dev/zero of=page.pgm bs=1024 count=96 2>/dev/null
+      - run:
+          name: mvn -q package
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target umbra -j2
+      - run:
+          name: OCR the scanned page
+          command: ./build/umbra page.pgm --lang jpn+eng --psm 6
+  turbine_yaw:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Unpack sources
+          command: tar xzf egg.tgz
+      - run:
+          name: Install essentials
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: Wind direction series
+          command: |
+            awk 'BEGIN{for(i=0;i<1440;i++)print 215}' > wind.txt
+      - run:
+          name: Compile with Intel Fortran
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target turbine_yaw -j2
+      - run:
+          name: Yaw misalignment correction
+          command: ./build/turbine_yaw wind.txt --deadband 8
+  dairy-route:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Restore vendored sources
+          command: tar xzf egg.tgz
+      - run:
+          name: Provision build deps
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: Farm pickups
+          command: |
+            printf 'farm,liters\n' > farms.csv && printf '%s,%s\n' F1 820 F2 1100 F3 640 F4 2050 >> farms.csv
+      - run:
+          name: javac
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target dairy-route -j2
+      - run:
+          name: Vehicle routing with tank limits
+          command: ./build/dairy-route farms.csv --tank 8000 --trucks 2
+  dedupe_blocks:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Fetch fixtures
+          command: tar xzf egg.tgz
+      - run:
+          name: Install prerequisites
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: Repetitive blob
+          command: |
+            { yes 'block-of-data' | head -c 1048576 || true; } > blob.dat
+      - run:
+          name: cargo build --release -j2
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target dedupe_blocks -j2
+      - run:
+          name: Content-defined chunking
+          command: ./build/dedupe_blocks --avg 8k --min 2k --max 32k
+  wasteRoute:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Sync asset bundles
+          command: tar xzf egg.tgz
+      - run:
+          name: Provision compiler
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: Bin locations
+          command: |
+            awk 'BEGIN{for(i=0;i<300;i++)print rand()*10, rand()*10}' > bins.txt
+      - run:
+          name: cargo build --release -p core
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target wasteRoute -j2
+      - run:
+          name: Capacitated routing, 3 trucks
+          command: ./build/wasteRoute bins.txt --trucks 3 --cap 400
+  k8sDrainRehearsal:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Unpack toolkit
+          command: tar xzf egg.tgz
+      - run:
+          name: Install toolchain
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: Fake node inventory
+          command: |
+            printf 'node-%02d Ready\n' 1 2 3 4 5 6 > nodes.txt
+      - run:
+          name: go build -o drainer
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target k8sDrainRehearsal -j2
+      - run:
+          name: Rehearse rolling drain
+          command: ./build/k8sDrainRehearsal --max-unavailable 1
+  crosswordFill:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Hydrate workspace
+          command: tar xzf egg.tgz
+      - run:
+          name: Bootstrap toolchain
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: Grid template
+          command: |
+            touch grid.txt && printf '%s\n' '#..#.' '.....' '..#..' '.....' '.#..#' >> grid.txt
+      - run:
+          name: Compile with g++ -O2
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target crosswordFill -j2
+      - run:
+          name: Fill with dictionary, backtracking
+          command: ./build/crosswordFill grid.txt --dict words.txt
+  oeeshift:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Extract sources
+          command: tar xzf egg.tgz
+      - run:
+          name: Prepare build environment
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: Machine states
+          command: |
+            awk -v s='RUN 1 60' 'BEGIN{for(i=0;i<480;i++)print s}' > states.txt
+      - run:
+          name: gradle build
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target oeeshift -j2
+      - run:
+          name: OEE for night shift
+          command: ./build/oeeshift --shift night --ideal-ct 1.2
+  otaDelta:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Restore build cache
+          command: tar xzf egg.tgz
+      - run:
+          name: Install build tools
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: Old and new images
+          command: |
+            head -c 200000 /dev/urandom > old.bin && cp old.bin new.bin && printf 'x' >> new.bin
+      - run:
+          name: cargo build --release -j4
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target otaDelta -j2
+      - run:
+          name: Produce bsdiff delta
+          command: ./build/otaDelta old.bin new.bin --out delta.bin
+  orbitdeck:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Pull reference data
+          command: tar xzf egg.tgz
+      - run:
+          name: Provision SDK
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: TLE sample
+          command: |
+            echo '1 25544U 98067A' > iss.tle; echo '2 25544  51.6' >> iss.tle
+      - run:
+          name: maturin develop
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target orbitdeck -j2
+      - run:
+          name: Propagate 90 minutes
+          command: ./build/orbitdeck --minutes 90 --step 10
+  pcb_drc:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Stage inputs
+          command: tar xzf egg.tgz
+      - run:
+          name: Set up compiler
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: Board file stub
+          command: |
+            truncate -s 40k board.kicad_pcb
+      - run:
+          name: skip (script)
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target pcb_drc -j2
+      - run:
+          name: Run DRC, min clearance 0.15
+          command: ./build/pcb_drc board.kicad_pcb --clearance 0.15
+  copperhead:
+    docker:
+      - image: cimg/base:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Unpack bundle
+          command: tar xzf egg.tgz
+      - run:
+          name: Install dependencies
+          command: sudo apt-get update && sudo apt-get install -y cmake g++
+      - run:
+          name: Fetch empty catalogue skeleton
+          command: |
+            echo date,area,group > spots.csv
+      - run:
+          name: Build (gfortran)
+          command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target copperhead -j2
+      - run:
+          name: Count groups per rotation
+          command: ./build/copperhead spots.csv --carrington 2290
+
+workflows:
+  main:
+    jobs:
+      - petalmap
+      - I18nSweep
+      - demandFcWeekly
+      - fennel
+      - MapMatch
+      - jade4
+      - go-mcts
+      - GpxSimplify
+      - aquaponics_ctl
+      - ballast-calc
+      - moth
+      - skureorder
+      - logchew
+      - ursa
+      - revgeoTiles
+      - sorrel
+      - payroll_oct
+      - pumice
+      - umbra
+      - turbine_yaw
+      - dairy-route
+      - dedupe_blocks
+      - wasteRoute
+      - k8sDrainRehearsal
+      - crosswordFill
+      - oeeshift
+      - otaDelta
+      - orbitdeck
+      - pcb_drc
+      - copperhead
